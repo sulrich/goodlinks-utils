@@ -1,0 +1,92 @@
+  <h2>reading by year › domain › tag</h2>
+  <p style="font-size:0.8rem;color:#666;margin:-0.4rem 0 0.4rem">
+    click any segment to drill down · click the centre to go back up
+  </p>
+  <div id="sunburst" class="chart"></div>
+
+  <script>
+  // ---------------------------------------------------------------------------
+  // sunburst: year > domain > tag, sized by article count, click to drill down
+  // ---------------------------------------------------------------------------
+  function renderSunburst(articles) {
+    try {
+      // Build tree: year -> domain -> tag -> count
+      // Uses addedDate year; articles with multiple tags appear in each tag's slice.
+      const tree = {};
+      for (const a of articles) {
+        const year = (a.addedDate || '').slice(0, 4);
+        if (!year) continue;
+        const domain = a.domain || '(unknown)';
+        const tags   = (a.tags && a.tags.length) ? a.tags : ['(untagged)'];
+        if (!tree[year])          tree[year] = {};
+        if (!tree[year][domain])  tree[year][domain] = {};
+        for (const tag of tags) {
+          tree[year][domain][tag] = (tree[year][domain][tag] || 0) + 1;
+        }
+      }
+
+      // Cap to top-N domains per year; roll the rest into "(other)"
+      const TOP_DOMAINS = 20;
+
+      const ids = [], labels = [], parents = [], values = [];
+
+      for (const year of Object.keys(tree).sort()) {
+        const domains = tree[year];
+
+        // Rank domains by total tag-weighted article count for this year
+        const ranked = Object.entries(domains)
+          .map(([d, tags]) => [d, Object.values(tags).reduce((s, v) => s + v, 0)])
+          .sort((a, b) => b[1] - a[1]);
+
+        let yearTotal = 0;
+        let otherTotal = 0;
+
+        ranked.forEach(([domain, domTotal], i) => {
+          if (i >= TOP_DOMAINS) { otherTotal += domTotal; return; }
+
+          const domId = `${year}||${domain}`;
+          let tagSum = 0;
+          for (const [tag, count] of Object.entries(domains[domain])) {
+            ids.push(`${domId}||${tag}`);
+            labels.push(tag);
+            parents.push(domId);
+            values.push(count);
+            tagSum += count;
+          }
+          ids.push(domId);
+          labels.push(domain);
+          parents.push(year);
+          values.push(tagSum);
+          yearTotal += tagSum;
+        });
+
+        if (otherTotal > 0) {
+          ids.push(`${year}||(other)`);
+          labels.push('(other)');
+          parents.push(year);
+          values.push(otherTotal);
+          yearTotal += otherTotal;
+        }
+
+        ids.push(year);
+        labels.push(year);
+        parents.push('');
+        values.push(yearTotal);
+      }
+
+      Plotly.newPlot('sunburst', [{
+        type: 'sunburst',
+        ids, labels, parents, values,
+        branchvalues: 'total',
+        maxdepth: 2,          // show year + domain rings on load; tags appear on drill-down
+        insidetextorientation: 'radial',
+        hovertemplate: '<b>%{label}</b><br>%{value} articles<extra></extra>',
+        leaf: { opacity: 0.85 },
+      }], {
+        height: 580,
+        margin: { t: 10, b: 10, l: 10, r: 10 },
+        paper_bgcolor: '#fff',
+      }, { responsive: true, displayModeBar: false });
+    } catch (err) { chartError('sunburst', err); }
+  }
+  </script>

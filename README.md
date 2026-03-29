@@ -126,6 +126,87 @@ requires `ANTHROPIC_API_KEY` to be set. uses claude haiku to keep costs reasonab
 most commands support `--json` for machine-readable output. commands that mutate
 data support `--dry-run` to preview what would change without touching anything.
 
+## goodlinks-visuals
+
+if gardening is the shovel, visuals is the graph you make after shoveling to feel
+like the hoarding was somehow intentional. it fetches the same collection via the
+local API and produces a JSON dataset plus an HTML stub you can open in a browser
+or drop into a hugo site.
+
+```bash
+chmod +x goodlinks-visuals.py
+./goodlinks-visuals.py
+```
+
+or explicitly:
+
+```bash
+uv run goodlinks-visuals.py
+```
+
+same auth precedence as the gardening script. goodlinks must be running with the
+API enabled before this does anything useful.
+
+### what it generates
+
+running the script writes into `goodlinks-stats/` by default:
+
+```
+goodlinks-stats/
+  data/goodlinks-data.json   ← the full dataset
+  index.html                 ← HTML stub that loads the visualizations
+```
+
+the dataset has four keys:
+
+- `articles` -- every link as a table row, sorted by read date descending
+- `heatmap` -- `{date: count}` of reads per calendar day (github-style grid)
+- `tag_series` -- `{tag: {month: count}}` for tracking tag volume over time
+- `domain_series` -- `{domain: {month: count}}` for the same but by source
+
+### options
+
+```bash
+./goodlinks-visuals.py --output-dir ~/Sites/reading-stats
+./goodlinks-visuals.py --pretty           # human-readable JSON (larger file)
+./goodlinks-visuals.py --base-url http://localhost:9428/api/v1
+./goodlinks-visuals.py --token mytoken
+```
+
+### hugo export
+
+if you maintain a hugo site, `--hugo-dir` copies the dataset JSON into a page
+bundle and installs the shortcode templates into `layouts/shortcodes/`. the
+shortcodes let you embed the charts anywhere in your content without duplicating
+the visualization code.
+
+```bash
+./goodlinks-visuals.py \
+  --hugo-dir ~/Sites/my-hugo-site \
+  --page-bundle content/posts/reading-stats
+```
+
+this writes `goodlinks-data.json` into the page bundle directory and drops four
+shortcode templates into `layouts/shortcodes/`:
+
+| shortcode              | what it renders                          |
+|------------------------|------------------------------------------|
+| `goodlinks-plotly`     | stacked area chart of tags over time     |
+| `goodlinks-heatmap`    | calendar heatmap of reading activity     |
+| `goodlinks-sunburst`   | sunburst chart of domain/tag breakdown   |
+| `goodlinks-table`      | sortable/filterable article table        |
+
+`--page-bundle` is required when `--hugo-dir` is set.
+
+### templates
+
+the `templates/` directory is where the HTML lives. the top-level templates
+(`index.html`, `heatmap.html`, `sunburst.html`, `table.html`) are rendered via
+jinja2 to produce the standalone output. `templates/shortcodes/` holds the four
+hugo shortcode templates that get copied on `--hugo-dir` export. if you want to
+customize the look, edit the templates -- the script just renders them, it doesn't
+own the markup.
+
 ## ideas on the backlog
 
 - `untag` -- remove a tag from all articles matching a domain or search term

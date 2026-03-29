@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>goodlinks stats</title>
+  <!-- plotly.js: interactive charting library -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 1rem 2rem;
+      background: #f9f9f9;
+      color: #222;
+    }
+    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.1rem; margin: 2rem 0 0.5rem; color: #444; }
+    .chart { background: #fff; border-radius: 6px; padding: 0.5rem; margin-bottom: 1.5rem; }
+    .chart-error { color: #c00; font-size: 0.85rem; padding: 0.5rem; }
+
+    /* heatmap */
+    .heatmap-toolbar { margin-bottom: 0.4rem; font-size: 0.85rem; }
+    #heatmap-year { padding: 0.2rem 0.4rem; font-size: 0.85rem; border: 1px solid #ccc; border-radius: 3px; }
+    #heatmap { overflow-x: auto; }
+
+    /* sortable / resizable table */
+    .table-section { width: 80%; }
+    .table-toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.4rem; }
+    #table-filter { padding: 0.3rem 0.5rem; font-size: 0.85rem; width: 260px; border: 1px solid #ccc; border-radius: 3px; }
+    #table-count { font-size: 0.78rem; color: #666; }
+    #table-container { overflow-x: auto; overflow-y: auto; max-height: 430px; border: 1px solid #ddd; border-radius: 4px; width: 100%; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.78rem; table-layout: fixed; }
+    thead th { position: sticky; top: 0; z-index: 1; background: #eee; }
+    th, td { padding: 0.28rem 0.5rem; border-bottom: 1px solid #e4e4e4; border-right: 1px solid #e4e4e4; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    th { position: relative; cursor: pointer; user-select: none; padding-right: 14px; }
+    th:hover { background: #ddd; }
+    th.sort-asc::after  { content: " ▲"; }
+    th.sort-desc::after { content: " ▼"; }
+    tr:nth-child(even) td { background: #fafafa; }
+    td a { color: #0057b7; text-decoration: none; }
+    td a:hover { text-decoration: underline; }
+    /* column widths: fixed cols take declared widths, title gets the rest */
+    .col-date   { width: 74px; }
+    .col-domain { width: 140px; }
+    .col-tags   { width: 180px; white-space: normal; }
+    /* column resize handle */
+    .col-resize-handle {
+      position: absolute; right: 0; top: 0; bottom: 0; width: 5px;
+      cursor: col-resize; z-index: 2;
+    }
+    .col-resize-handle:hover { background: rgba(0,0,0,0.18); }
+    .tag-pill {
+      display: inline-block;
+      background: #e2eaff;
+      border-radius: 3px;
+      padding: 1px 4px;
+      margin: 1px 1px;
+      font-size: 0.7rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>goodlinks stats</h1>
+  <p id="summary-line">loading dataset…</p>
+
+  {% include "heatmap.html" %}
+
+  {% include "sunburst.html" %}
+
+  {% include "table.html" %}
+
+  <script>
+  // ---------------------------------------------------------------------------
+  // load dataset
+  // ---------------------------------------------------------------------------
+  async function loadData() {
+    const resp = await fetch('data/goodlinks-data.json');
+    if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
+    return resp.json();
+  }
+
+  function chartError(divId, err) {
+    document.getElementById(divId).innerHTML =
+      `<p class="chart-error">render error: ${err.message}</p>`;
+    console.error(divId, err);
+  }
+
+  // ---------------------------------------------------------------------------
+  // main
+  // ---------------------------------------------------------------------------
+  (async () => {
+    try {
+      const data = await loadData();
+      const { articles, heatmap, tag_series, domain_series } = data;
+
+      const readCount = articles.filter(a => a.readDate).length;
+      document.getElementById('summary-line').textContent =
+        `${articles.length} articles — ${readCount} read — ${Object.keys(tag_series).length} tags`;
+
+      // populate year dropdown (reverse-chron, default = current/most recent year)
+      const heatmapYears = [...new Set(Object.keys(heatmap).map(d => d.slice(0,4)))]
+        .sort().reverse();
+      const sel = document.getElementById('heatmap-year');
+      heatmapYears.forEach(y => {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y;
+        sel.appendChild(opt);
+      });
+      const defaultYear = parseInt(heatmapYears[0] || new Date().getFullYear());
+      sel.value = String(defaultYear);
+      sel.addEventListener('change', () => renderHeatmap(heatmap, parseInt(sel.value)));
+
+      renderHeatmap(heatmap, defaultYear);
+      renderSunburst(articles);
+      renderTable(articles);
+    } catch (err) {
+      const line = document.getElementById('summary-line');
+      line.textContent = `error loading data: ${err.message}`;
+      line.style.color = '#c00';
+      console.error(err);
+    }
+  })();
+  </script>
+</body>
+</html>

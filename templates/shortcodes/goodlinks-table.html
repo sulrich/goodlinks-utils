@@ -1,0 +1,133 @@
+<div class="gl-table-section">
+  <div class="gl-table-toolbar">
+    <input id="gl-table-filter" type="search" placeholder="filter by title, tag, domain…" />
+    <span id="gl-table-count"></span>
+  </div>
+  <div id="gl-table-container">
+    <table id="gl-articles-table" class="gl-articles">
+      <thead>
+        <tr>
+          <th data-col="addedDate" class="gl-col-date sort-desc">added</th>
+          <th data-col="readDate"  class="gl-col-date">read</th>
+          <th data-col="title">title</th>
+          <th data-col="domain"    class="gl-col-domain">domain</th>
+          <th data-col="tags"      class="gl-col-tags">tags</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(async () => {
+  function chartError(err) {
+    document.getElementById('gl-table-container').innerHTML =
+      `<p class="gl-chart-error">render error: ${err.message}</p>`;
+    console.error('gl-table', err);
+  }
+
+  // shared data cache: fetch once even if multiple chart shortcodes are on the page
+  async function loadData() {
+    if (window.__goodlinksData__) return window.__goodlinksData__;
+    {{- $data := .Page.Resources.GetMatch "goodlinks-data.json" }}
+    {{- if $data }}
+    const url = "{{ $data.RelPermalink }}";
+    {{- else }}
+    throw new Error('goodlinks-data.json not found in page bundle – run goodlinks-visuals.py with --hugo-dir and --page-bundle');
+    {{- end }}
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
+    window.__goodlinksData__ = await resp.json();
+    return window.__goodlinksData__;
+  }
+
+  function makeColumnsResizable(table) {
+    table.querySelectorAll('thead th').forEach(th => {
+      const handle = document.createElement('span');
+      handle.className = 'gl-col-resize-handle';
+      th.appendChild(handle);
+      handle.addEventListener('click', e => e.stopPropagation());
+      handle.addEventListener('mousedown', e => {
+        e.preventDefault(); e.stopPropagation();
+        const startX = e.clientX, startW = th.getBoundingClientRect().width;
+        document.body.style.cursor = 'col-resize';
+        const onMove = e => { th.style.width = Math.max(36, startW + e.clientX - startX) + 'px'; };
+        const onUp   = () => {
+          document.body.style.cursor = '';
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+  }
+
+  function renderTable(articles) {
+    const tbody = document.querySelector('#gl-articles-table tbody');
+    let sortCol = 'addedDate', sortDir = -1, filterText = '';
+
+    function escHtml(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function escAttr(s) { return String(s ?? '').replace(/"/g,'&quot;'); }
+
+    function row(a) {
+      const tags = (a.tags || []).map(t => `<span class="gl-tag-pill">${escHtml(t)}</span>`).join('');
+      return `<tr>
+        <td>${a.addedDate || ''}</td>
+        <td>${a.readDate  || ''}</td>
+        <td><a href="${escAttr(a.url)}" target="_blank" rel="noopener">${escHtml(a.title)}</a></td>
+        <td>${escHtml(a.domain)}</td>
+        <td>${tags}</td>
+      </tr>`;
+    }
+
+    function render() {
+      const lower    = filterText.toLowerCase();
+      let filtered   = articles;
+      if (lower) {
+        filtered = articles.filter(a =>
+          (a.title  || '').toLowerCase().includes(lower) ||
+          (a.domain || '').toLowerCase().includes(lower) ||
+          (a.tags   || []).some(t => t.toLowerCase().includes(lower))
+        );
+      }
+      const sorted = [...filtered].sort((a, b) => {
+        if (sortCol === 'tags') {
+          return sortDir * (a.tags||[]).join(',').localeCompare((b.tags||[]).join(','));
+        }
+        return sortDir * (a[sortCol]??'').localeCompare(b[sortCol]??'');
+      });
+      tbody.innerHTML = sorted.map(row).join('');
+      document.getElementById('gl-table-count').textContent =
+        lower ? `${sorted.length} of ${articles.length}` : `${articles.length} articles`;
+    }
+
+    document.querySelectorAll('#gl-articles-table th').forEach(th => {
+      th.addEventListener('click', () => {
+        const col = th.dataset.col;
+        sortDir = (sortCol === col) ? sortDir * -1 : 1;
+        sortCol = col;
+        document.querySelectorAll('#gl-articles-table th').forEach(h => h.classList.remove('sort-asc','sort-desc'));
+        th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
+        render();
+      });
+    });
+
+    document.getElementById('gl-table-filter').addEventListener('input', e => {
+      filterText = e.target.value;
+      render();
+    });
+
+    makeColumnsResizable(document.getElementById('gl-articles-table'));
+    render();
+  }
+
+  try {
+    const { articles } = await loadData();
+    renderTable(articles);
+  } catch (err) { chartError(err); }
+})();
+</script>

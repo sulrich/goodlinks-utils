@@ -1,0 +1,133 @@
+  <div class="table-section">
+  <h2>articles</h2>
+  <div class="table-toolbar">
+    <input id="table-filter" type="search" placeholder="filter by title, tag, domain…" />
+    <span id="table-count"></span>
+  </div>
+  <div id="table-container">
+    <table id="articles-table">
+      <thead>
+        <tr>
+          <th data-col="addedDate" class="col-date sort-desc">added</th>
+          <th data-col="readDate"  class="col-date">read</th>
+          <th data-col="title">title</th>
+          <th data-col="domain"    class="col-domain">domain</th>
+          <th data-col="tags"      class="col-tags">tags</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  </div>
+
+  <script>
+  // ---------------------------------------------------------------------------
+  // resizable column helper
+  // ---------------------------------------------------------------------------
+  function makeColumnsResizable(table) {
+    table.querySelectorAll('thead th').forEach(th => {
+      const handle = document.createElement('span');
+      handle.className = 'col-resize-handle';
+      th.appendChild(handle);
+
+      // stop clicks on the handle from triggering column sort
+      handle.addEventListener('click', e => e.stopPropagation());
+
+      handle.addEventListener('mousedown', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const startX = e.clientX;
+        const startW = th.getBoundingClientRect().width;
+        document.body.style.cursor = 'col-resize';
+
+        const onMove = e => {
+          th.style.width = Math.max(36, startW + e.clientX - startX) + 'px';
+        };
+        const onUp = () => {
+          document.body.style.cursor = '';
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // sortable / filterable article table
+  // ---------------------------------------------------------------------------
+  function renderTable(articles) {
+    const tbody = document.querySelector('#articles-table tbody');
+    let sortCol = 'addedDate';
+    let sortDir = -1; // -1 = desc, 1 = asc
+    let filterText = '';
+
+    function row(a) {
+      const tags = (a.tags || []).map(t => `<span class="tag-pill">${escHtml(t)}</span>`).join('');
+      return `<tr>
+        <td>${a.addedDate || ''}</td>
+        <td>${a.readDate  || ''}</td>
+        <td><a href="${escAttr(a.url)}" target="_blank" rel="noopener">${escHtml(a.title)}</a></td>
+        <td>${escHtml(a.domain)}</td>
+        <td>${tags}</td>
+      </tr>`;
+    }
+
+    function escHtml(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function escAttr(s) {
+      return String(s ?? '').replace(/"/g,'&quot;');
+    }
+
+    function render() {
+      const lower = filterText.toLowerCase();
+      let filtered = articles;
+      if (lower) {
+        filtered = articles.filter(a =>
+          (a.title || '').toLowerCase().includes(lower) ||
+          (a.domain || '').toLowerCase().includes(lower) ||
+          (a.tags || []).some(t => t.toLowerCase().includes(lower))
+        );
+      }
+      const sorted = [...filtered].sort((a, b) => {
+        const av = a[sortCol] ?? '';
+        const bv = b[sortCol] ?? '';
+        if (sortCol === 'tags') {
+          const as = (a.tags || []).join(',');
+          const bs = (b.tags || []).join(',');
+          return sortDir * as.localeCompare(bs);
+        }
+        return sortDir * av.localeCompare(bv);
+      });
+      tbody.innerHTML = sorted.map(row).join('');
+      document.getElementById('table-count').textContent =
+        lower ? `${sorted.length} of ${articles.length}` : `${articles.length} articles`;
+    }
+
+    // header sort
+    document.querySelectorAll('#articles-table th').forEach(th => {
+      th.addEventListener('click', () => {
+        const col = th.dataset.col;
+        if (sortCol === col) {
+          sortDir *= -1;
+        } else {
+          sortCol = col;
+          sortDir = 1;
+        }
+        document.querySelectorAll('#articles-table th').forEach(h => h.classList.remove('sort-asc','sort-desc'));
+        th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
+        render();
+      });
+    });
+
+    document.getElementById('table-filter').addEventListener('input', e => {
+      filterText = e.target.value;
+      render();
+    });
+
+    makeColumnsResizable(document.getElementById('articles-table'));
+    render();
+  }
+  </script>

@@ -1,0 +1,85 @@
+<p style="font-size:0.8rem;color:#666;margin:0 0 0.4rem">
+  click any segment to drill down · click the centre to go back up
+</p>
+<div id="gl-sunburst" class="gl-chart"></div>
+
+<script>
+(async () => {
+  function chartError(err) {
+    document.getElementById('gl-sunburst').innerHTML =
+      `<p class="gl-chart-error">render error: ${err.message}</p>`;
+    console.error('gl-sunburst', err);
+  }
+
+  // shared data cache: fetch once even if multiple chart shortcodes are on the page
+  async function loadData() {
+    if (window.__goodlinksData__) return window.__goodlinksData__;
+    {{- $data := .Page.Resources.GetMatch "goodlinks-data.json" }}
+    {{- if $data }}
+    const url = "{{ $data.RelPermalink }}";
+    {{- else }}
+    throw new Error('goodlinks-data.json not found in page bundle – run goodlinks-visuals.py with --hugo-dir and --page-bundle');
+    {{- end }}
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
+    window.__goodlinksData__ = await resp.json();
+    return window.__goodlinksData__;
+  }
+
+  function renderSunburst(articles) {
+    const tree = {};
+    for (const a of articles) {
+      const year = (a.addedDate || '').slice(0, 4);
+      if (!year) continue;
+      const domain = a.domain || '(unknown)';
+      const tags   = (a.tags && a.tags.length) ? a.tags : ['(untagged)'];
+      if (!tree[year])         tree[year] = {};
+      if (!tree[year][domain]) tree[year][domain] = {};
+      for (const tag of tags) {
+        tree[year][domain][tag] = (tree[year][domain][tag] || 0) + 1;
+      }
+    }
+
+    const TOP_DOMAINS = 20;
+    const ids = [], labels = [], parents = [], values = [];
+
+    for (const year of Object.keys(tree).sort()) {
+      const domains = tree[year];
+      const ranked  = Object.entries(domains)
+        .map(([d, tags]) => [d, Object.values(tags).reduce((s, v) => s + v, 0)])
+        .sort((a, b) => b[1] - a[1]);
+      let yearTotal = 0, otherTotal = 0;
+      ranked.forEach(([domain, domTotal], i) => {
+        if (i >= TOP_DOMAINS) { otherTotal += domTotal; return; }
+        const domId = `${year}||${domain}`;
+        let tagSum  = 0;
+        for (const [tag, count] of Object.entries(domains[domain])) {
+          ids.push(`${domId}||${tag}`); labels.push(tag); parents.push(domId); values.push(count);
+          tagSum += count;
+        }
+        ids.push(domId); labels.push(domain); parents.push(year); values.push(tagSum);
+        yearTotal += tagSum;
+      });
+      if (otherTotal > 0) {
+        ids.push(`${year}||(other)`); labels.push('(other)'); parents.push(year); values.push(otherTotal);
+        yearTotal += otherTotal;
+      }
+      ids.push(year); labels.push(year); parents.push(''); values.push(yearTotal);
+    }
+
+    Plotly.newPlot('gl-sunburst', [{
+      type:'sunburst', ids, labels, parents, values,
+      branchvalues:'total', maxdepth:2, insidetextorientation:'radial',
+      hovertemplate:'<b>%{label}</b><br>%{value} articles<extra></extra>',
+      leaf:{ opacity:0.85 },
+    }], {
+      height:580, margin:{ t:10, b:10, l:10, r:10 }, paper_bgcolor:'#fff',
+    }, { responsive:true, displayModeBar:false });
+  }
+
+  try {
+    const { articles } = await loadData();
+    renderSunburst(articles);
+  } catch (err) { chartError(err); }
+})();
+</script>

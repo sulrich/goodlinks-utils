@@ -1,0 +1,126 @@
+<div class="gl-heatmap-toolbar">
+  <label for="gl-heatmap-year">year: </label>
+  <select id="gl-heatmap-year"></select>
+</div>
+<div id="gl-heatmap" class="gl-chart"></div>
+
+<script>
+(async () => {
+  function chartError(err) {
+    document.getElementById('gl-heatmap').innerHTML =
+      `<p class="gl-chart-error">render error: ${err.message}</p>`;
+    console.error('gl-heatmap', err);
+  }
+
+  // shared data cache: fetch once even if multiple chart shortcodes are on the page
+  async function loadData() {
+    if (window.__goodlinksData__) return window.__goodlinksData__;
+    {{- $data := .Page.Resources.GetMatch "goodlinks-data.json" }}
+    {{- if $data }}
+    const url = "{{ $data.RelPermalink }}";
+    {{- else }}
+    throw new Error('goodlinks-data.json not found in page bundle – run goodlinks-visuals.py with --hugo-dir and --page-bundle');
+    {{- end }}
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
+    window.__goodlinksData__ = await resp.json();
+    return window.__goodlinksData__;
+  }
+
+  function buildYearGrid(year, heatmap) {
+    const NUM_WEEKS = 54;
+    const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const z    = Array.from({length: 7}, () => Array(NUM_WEEKS).fill(null));
+    const text = Array.from({length: 7}, () => Array(NUM_WEEKS).fill(''));
+    const jan1    = new Date(year, 0, 1, 12);
+    const jan1dow = jan1.getDay();
+    const cur = new Date(year, 0, 1, 12);
+    while (cur.getFullYear() === year) {
+      const mm  = String(cur.getMonth() + 1).padStart(2, '0');
+      const dd  = String(cur.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${mm}-${dd}`;
+      const doy     = Math.round((cur - jan1) / 86400000);
+      const weekCol = Math.floor((doy + jan1dow) / 7);
+      const dayRow  = cur.getDay();
+      if (weekCol < NUM_WEEKS) {
+        const count = heatmap[dateStr] || 0;
+        z[dayRow][weekCol]    = count;
+        text[dayRow][weekCol] = `${dateStr}: ${count} article(s)`;
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+    const monthTickVals = [], monthTickText = [];
+    for (let m = 0; m < 12; m++) {
+      const d    = new Date(year, m, 1, 12);
+      const doy  = Math.round((d - jan1) / 86400000);
+      const wcol = Math.floor((doy + jan1dow) / 7);
+      if (wcol < NUM_WEEKS) { monthTickVals.push(wcol); monthTickText.push(MONTH_NAMES[m]); }
+    }
+    return { z, text, monthTickVals, monthTickText };
+  }
+
+  function renderHeatmap(heatmap, year) {
+    if (Object.keys(heatmap).length === 0) {
+      document.getElementById('gl-heatmap').innerHTML =
+        '<p style="padding:0.5rem;color:#888">no read dates in dataset</p>';
+      return;
+    }
+    const MARGIN   = { t: 22, b: 44, l: 34, r: 8 };
+    const NUM_WEEKS = 53, NUM_ROWS = 7, GAP_PX = 3;
+    const CHART_W  = document.getElementById('gl-heatmap').offsetWidth;
+    const plotW    = CHART_W - MARGIN.l - MARGIN.r;
+    // derive height so cells are square: plotH/NUM_ROWS == plotW/NUM_WEEKS
+    const plotH    = Math.round(plotW * NUM_ROWS / NUM_WEEKS);
+    const CHART_H  = plotH + MARGIN.t + MARGIN.b;
+    const { z, text, monthTickVals, monthTickText } = buildYearGrid(year, heatmap);
+    const allCounts = z.flat().filter(v => v !== null && v > 0);
+    const maxCount  = allCounts.length ? Math.max(...allCounts) : 1;
+    const qz = z.map(row => row.map(v => {
+      if (v === null) return null;
+      if (v === 0)    return 0;
+      const r = v / maxCount;
+      if (r < 0.15) return 1; if (r < 0.40) return 2; if (r < 0.70) return 3; return 4;
+    }));
+    const PALETTE = ['#ebedf0', '#9be9a8', '#40c463', '#30a14e', '#216e39'];
+    const colorscale = [[0, PALETTE[0]], [0.25, PALETTE[1]], [0.5, PALETTE[2]], [0.75, PALETTE[3]], [1.0, PALETTE[4]]];
+    const SQ_PX = 11, LEG_GAP = 3;
+    const sqW = SQ_PX / plotW, sqH = SQ_PX / plotH, gW = LEG_GAP / plotW;
+    const legY  = -(22 / plotH);
+    const legX0 = (plotW - (5*SQ_PX + 4*LEG_GAP + 2*28)) / plotW;
+    const shapes = PALETTE.map((color, i) => ({
+      type: 'rect', xref: 'paper', yref: 'paper',
+      x0: legX0 + 28/plotW + i*(sqW+gW), x1: legX0 + 28/plotW + i*(sqW+gW) + sqW,
+      y0: legY - sqH/2, y1: legY + sqH/2, fillcolor: color, line: { width: 0 },
+    }));
+    const legEnd = legX0 + 28/plotW + 5*(sqW+gW) - gW;
+    const annotations = [
+      { xref:'paper', yref:'paper', x: legX0+24/plotW, y: legY, text:'Less',
+        showarrow:false, xanchor:'right', yanchor:'middle', font:{size:10, color:'#666'} },
+      { xref:'paper', yref:'paper', x: legEnd+4/plotW,  y: legY, text:'More',
+        showarrow:false, xanchor:'left',  yanchor:'middle', font:{size:10, color:'#666'} },
+    ];
+    Plotly.react('gl-heatmap', [{
+      type:'heatmap', x:Array.from({length:NUM_WEEKS},(_,i)=>i), y:Array.from({length:NUM_ROWS},(_,i)=>i),
+      z:qz, text, hoverinfo:'text', xgap:GAP_PX, ygap:GAP_PX, colorscale, zmin:0, zmax:4, showscale:false,
+    }], {
+      width:CHART_W, height:CHART_H,
+      xaxis:{ tickvals:monthTickVals, ticktext:monthTickText, side:'top', showgrid:false, zeroline:false,
+              range:[-0.5,NUM_WEEKS-0.5], fixedrange:true, tickfont:{size:11} },
+      yaxis:{ autorange:'reversed', tickvals:[1,3,5], ticktext:['Mon','Wed','Fri'],
+              showgrid:false, zeroline:false, range:[-0.5,NUM_ROWS-0.5], fixedrange:true, tickfont:{size:10} },
+      shapes, annotations, margin:MARGIN, plot_bgcolor:'#fff', paper_bgcolor:'#fff',
+    }, { responsive:false, displayModeBar:false });
+  }
+
+  try {
+    const { heatmap } = await loadData();
+    const years = [...new Set(Object.keys(heatmap).map(d => d.slice(0,4)))].sort().reverse();
+    const sel   = document.getElementById('gl-heatmap-year');
+    years.forEach(y => { const o = document.createElement('option'); o.value=y; o.textContent=y; sel.appendChild(o); });
+    const defaultYear = parseInt(years[0] || new Date().getFullYear());
+    sel.value = String(defaultYear);
+    sel.addEventListener('change', () => renderHeatmap(heatmap, parseInt(sel.value)));
+    renderHeatmap(heatmap, defaultYear);
+  } catch (err) { chartError(err); }
+})();
+</script>

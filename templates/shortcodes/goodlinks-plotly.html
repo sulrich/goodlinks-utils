@@ -1,0 +1,45 @@
+<!-- goodlinks-plotly: load once per page before any goodlinks chart shortcodes -->
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<style>
+  .gl-chart { background: #fff; border-radius: 6px; padding: 0.5rem; margin-bottom: 1.5rem; }
+  .gl-chart-error { color: #c00; font-size: 0.85rem; padding: 0.5rem; }
+
+  /* heatmap */
+  .gl-heatmap-toolbar { margin-bottom: 0.4rem; font-size: 0.85rem; }
+  #gl-heatmap-year { padding: 0.2rem 0.4rem; font-size: 0.85rem; border: 1px solid #ccc; border-radius: 3px; }
+  #gl-heatmap { overflow-x: auto; }
+
+  /* sortable / resizable table */
+  .gl-table-section { width: 100%; }
+  .gl-table-toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.4rem; }
+  #gl-table-filter { padding: 0.3rem 0.5rem; font-size: 0.85rem; width: 260px; border: 1px solid #ccc; border-radius: 3px; }
+  #gl-table-count { font-size: 0.78rem; color: #666; }
+  #gl-table-container { overflow-x: auto; overflow-y: auto; max-height: 430px; border: 1px solid #ddd; border-radius: 4px; width: 100%; }
+  table.gl-articles { border-collapse: collapse; width: 100%; font-size: 0.78rem; table-layout: fixed; }
+  table.gl-articles thead th { position: sticky; top: 0; z-index: 1; background: #eee; }
+  table.gl-articles th,
+  table.gl-articles td { padding: 0.28rem 0.5rem; border-bottom: 1px solid #e4e4e4; border-right: 1px solid #e4e4e4; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.gl-articles th { position: relative; cursor: pointer; user-select: none; padding-right: 14px; }
+  table.gl-articles th:hover { background: #ddd; }
+  table.gl-articles th.sort-asc::after  { content: " ▲"; }
+  table.gl-articles th.sort-desc::after { content: " ▼"; }
+  table.gl-articles tr:nth-child(even) td { background: #fafafa; }
+  table.gl-articles td a { color: #0057b7; text-decoration: none; }
+  table.gl-articles td a:hover { text-decoration: underline; }
+  .gl-col-date   { width: 74px; }
+  .gl-col-domain { width: 140px; }
+  .gl-col-tags   { width: 180px; white-space: normal; }
+  .gl-col-resize-handle {
+    position: absolute; right: 0; top: 0; bottom: 0; width: 5px;
+    cursor: col-resize; z-index: 2;
+  }
+  .gl-col-resize-handle:hover { background: rgba(0,0,0,0.18); }
+  .gl-tag-pill {
+    display: inline-block;
+    background: #e2eaff;
+    border-radius: 3px;
+    padding: 1px 4px;
+    margin: 1px 1px;
+    font-size: 0.7rem;
+  }
+</style>
