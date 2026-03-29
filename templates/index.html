@@ -76,9 +76,11 @@
   // load dataset
   // ---------------------------------------------------------------------------
   async function loadData() {
-    const resp = await fetch('data/goodlinks-data.json');
+    const resp = await fetch('data/goodlinks-data.json.gz');
     if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
-    return resp.json();
+    const ds = new DecompressionStream('gzip');
+    const text = await new Response(resp.body.pipeThrough(ds)).text();
+    return JSON.parse(text);
   }
 
   function chartError(divId, err) {
@@ -93,7 +95,7 @@
   (async () => {
     try {
       const data = await loadData();
-      const { articles, heatmap, tag_series, domain_series } = data;
+      const { articles, heatmap, tag_series } = data;
 
       const readCount = articles.filter(a => a.readDate).length;
       document.getElementById('summary-line').textContent =

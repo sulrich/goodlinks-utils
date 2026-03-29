@@ -17,6 +17,7 @@ default API base URL: http://localhost:9428/api/v1
 """
 
 import argparse
+import gzip
 import json
 import os
 import sys
@@ -158,9 +159,6 @@ def build_dataset(links: list[dict]) -> dict:
     articles = []
     read_date_counts: dict[str, int] = defaultdict(int)
     tag_month_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    domain_month_counts: dict[str, dict[str, int]] = defaultdict(
-        lambda: defaultdict(int)
-    )
 
     for link in links:
         url = link.get("url", "")
@@ -172,7 +170,6 @@ def build_dataset(links: list[dict]) -> dict:
 
         articles.append(
             {
-                "id": link.get("id"),
                 "title": title,
                 "url": url,
                 "domain": domain,
@@ -192,8 +189,6 @@ def build_dataset(links: list[dict]) -> dict:
         if month:
             for tag in tags:
                 tag_month_counts[tag][month] += 1
-            if domain:
-                domain_month_counts[domain][month] += 1
 
     # sort articles by read date descending (unread last)
     articles.sort(key=lambda a: a["readDate"] or "", reverse=True)
@@ -202,7 +197,6 @@ def build_dataset(links: list[dict]) -> dict:
         "articles": articles,
         "heatmap": dict(read_date_counts),
         "tag_series": {t: dict(v) for t, v in tag_month_counts.items()},
-        "domain_series": {d: dict(v) for d, v in domain_month_counts.items()},
     }
 
 
@@ -240,8 +234,10 @@ def export_hugo(
     bundle_dir = hugo_dir / page_bundle
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
-    json_path = bundle_dir / "goodlinks-data.json"
-    json_path.write_text(json.dumps(dataset, indent=indent, ensure_ascii=False))
+    json_path = bundle_dir / "goodlinks-data.json.gz"
+    json_bytes = json.dumps(dataset, indent=indent, ensure_ascii=False).encode()
+    with gzip.open(json_path, "wb") as f:
+        f.write(json_bytes)
     print(f"  wrote {json_path}", file=sys.stderr)
 
     shortcodes_dir = hugo_dir / "layouts" / "shortcodes"
@@ -331,11 +327,13 @@ def main() -> None:
     data_dir = out_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    # write dataset JSON
-    json_path = data_dir / "goodlinks-data.json"
+    # write dataset JSON (gzip-compressed)
+    json_path = data_dir / "goodlinks-data.json.gz"
     indent = 2 if args.pretty else None
-    json_path.write_text(json.dumps(dataset, indent=indent, ensure_ascii=False))
-    print(f"  wrote {json_path}", file=sys.stderr)
+    json_bytes = json.dumps(dataset, indent=indent, ensure_ascii=False).encode()
+    with gzip.open(json_path, "wb") as f:
+        f.write(json_bytes)
+    print(f"  wrote {json_path} ({len(json_bytes):,} → {json_path.stat().st_size:,} bytes)", file=sys.stderr)
 
     html_path = out_dir / "index.html"
     html_path.write_text(render_html())

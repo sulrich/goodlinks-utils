@@ -15,15 +15,17 @@
   // shared data cache: fetch once even if multiple chart shortcodes are on the page
   async function loadData() {
     if (window.__goodlinksData__) return window.__goodlinksData__;
-    {{- $data := .Page.Resources.GetMatch "goodlinks-data.json" }}
+    {{- $data := .Page.Resources.GetMatch "goodlinks-data.json.gz" }}
     {{- if $data }}
     const url = "{{ $data.RelPermalink }}";
     {{- else }}
-    throw new Error('goodlinks-data.json not found in page bundle – run goodlinks-visuals.py with --hugo-dir and --page-bundle');
+    throw new Error('goodlinks-data.json.gz not found in page bundle – run goodlinks-visuals.py with --hugo-dir and --page-bundle');
     {{- end }}
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
-    window.__goodlinksData__ = await resp.json();
+    const ds = new DecompressionStream('gzip');
+    const text = await new Response(resp.body.pipeThrough(ds)).text();
+    window.__goodlinksData__ = JSON.parse(text);
     return window.__goodlinksData__;
   }
 
