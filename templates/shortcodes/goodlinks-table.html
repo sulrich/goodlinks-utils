@@ -1,16 +1,17 @@
 <div class="gl-table-section">
   <div class="gl-table-toolbar">
-    <input id="gl-table-filter" type="search" placeholder="filter by title, tag, domain…" />
+    <label for="gl-year-select">year:</label>
+    <select id="gl-year-select"></select>
+    <input id="gl-table-filter" type="search" placeholder="filter by title or tag…" />
     <span id="gl-table-count"></span>
   </div>
   <div id="gl-table-container">
     <table id="gl-articles-table" class="gl-articles">
       <thead>
         <tr>
-          <th data-col="addedDate" class="gl-col-date sort-desc">added</th>
-          <th data-col="readDate"  class="gl-col-date">read</th>
+          <th data-col="readDate"  class="gl-col-date sort-desc">read</th>
+          <th data-col="addedDate" class="gl-col-date">added</th>
           <th data-col="title">title</th>
-          <th data-col="domain"    class="gl-col-domain">domain</th>
           <th data-col="tags"      class="gl-col-tags">tags</th>
         </tr>
       </thead>
@@ -21,27 +22,31 @@
 
 <script>
 (async () => {
+  const YEAR_URLS = {
+    {{- range (.Page.Resources.Match "goodlinks-articles-*.json.gz") }}
+    {{- $year := .Name | strings.TrimPrefix "goodlinks-articles-" | strings.TrimSuffix ".json.gz" }}
+    "{{ $year }}": "{{ .RelPermalink }}",
+    {{- end }}
+  };
+
   function chartError(err) {
     document.getElementById('gl-table-container').innerHTML =
       `<p class="gl-chart-error">render error: ${err.message}</p>`;
     console.error('gl-table', err);
   }
 
-  // shared data cache: fetch once even if multiple chart shortcodes are on the page
-  async function loadData() {
-    if (window.__goodlinksData__) return window.__goodlinksData__;
-    {{- $data := .Page.Resources.GetMatch "goodlinks-data.json.gz" }}
-    {{- if $data }}
-    const url = "{{ $data.RelPermalink }}";
-    {{- else }}
-    throw new Error('goodlinks-data.json.gz not found in page bundle – run goodlinks-visuals.py with --hugo-dir and --page-bundle');
-    {{- end }}
+  const yearCache = window.__glYearData__ = window.__glYearData__ || {};
+
+  async function loadYear(year) {
+    if (yearCache[year]) return yearCache[year];
+    const url = YEAR_URLS[year];
+    if (!url) throw new Error(`no data file for year ${year}`);
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
     const ds = new DecompressionStream('gzip');
     const text = await new Response(resp.body.pipeThrough(ds)).text();
-    window.__goodlinksData__ = JSON.parse(text);
-    return window.__goodlinksData__;
+    yearCache[year] = JSON.parse(text);
+    return yearCache[year];
   }
 
   function makeColumnsResizable(table) {
@@ -66,46 +71,85 @@
     });
   }
 
-  function renderTable(articles) {
-    const tbody = document.querySelector('#gl-articles-table tbody');
-    let sortCol = 'addedDate', sortDir = -1, filterText = '';
+  function escHtml(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function escAttr(s) { return String(s ?? '').replace(/"/g,'&quot;'); }
 
-    function escHtml(s) {
-      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    }
-    function escAttr(s) { return String(s ?? '').replace(/"/g,'&quot;'); }
-
-    function row(a) {
-      const tags = (a.tags || []).map(t => `<span class="gl-tag-pill">${escHtml(t)}</span>`).join('');
-      return `<tr>
-        <td>${a.addedDate || ''}</td>
-        <td>${a.readDate  || ''}</td>
-        <td><a href="${escAttr(a.url)}" target="_blank" rel="noopener">${escHtml(a.title)}</a></td>
-        <td>${escHtml(a.domain)}</td>
-        <td>${tags}</td>
-      </tr>`;
-    }
-
-    function render() {
-      const lower    = filterText.toLowerCase();
-      let filtered   = articles;
-      if (lower) {
-        filtered = articles.filter(a =>
-          (a.title  || '').toLowerCase().includes(lower) ||
-          (a.domain || '').toLowerCase().includes(lower) ||
-          (a.tags   || []).some(t => t.toLowerCase().includes(lower))
-        );
-      }
-      const sorted = [...filtered].sort((a, b) => {
-        if (sortCol === 'tags') {
-          return sortDir * (a.tags||[]).join(',').localeCompare((b.tags||[]).join(','));
+  function row(a, idx) {
+    const tags = (a.tags || []).map(t => `<span class="gl-tag-pill">${escHtml(t)}</span>`).join('');
+    const stripeClass = idx % 2 === 0 ? 'gl-row-even' : 'gl-row-odd';
+    let html = `<tr class="${stripeClass}">
+      <td>${a.readDate  || ''}</td>
+      <td>${a.addedDate || ''}</td>
+      <td><a href="${escAttr(a.url)}" target="_blank" rel="noopener">${escHtml(a.title)}</a></td>
+      <td>${tags}</td>
+    </tr>`;
+    if (a.highlights && a.highlights.length > 0) {
+      let detail = '';
+      for (const h of a.highlights) {
+        detail += `<blockquote class="gl-highlight">${escHtml(h.content)}</blockquote>`;
+        if (h.note) {
+          detail += `<div class="gl-highlight-note"><b>note:</b> ${escHtml(h.note)}</div>`;
         }
-        return sortDir * (a[sortCol]??'').localeCompare(b[sortCol]??'');
-      });
-      tbody.innerHTML = sorted.map(row).join('');
-      document.getElementById('gl-table-count').textContent =
-        lower ? `${sorted.length} of ${articles.length}` : `${articles.length} articles`;
+      }
+      html += `<tr class="gl-detail-row"><td colspan="4">${detail}</td></tr>`;
     }
+    return html;
+  }
+
+  const tbody  = document.querySelector('#gl-articles-table tbody');
+  let sortCol  = 'readDate', sortDir = -1, filterText = '', currentArticles = [];
+
+  function renderRows() {
+    const lower  = filterText.toLowerCase();
+    let filtered = currentArticles;
+    if (lower) {
+      filtered = currentArticles.filter(a =>
+        (a.title || '').toLowerCase().includes(lower) ||
+        (a.tags  || []).some(t => t.toLowerCase().includes(lower))
+      );
+    }
+    const sorted = [...filtered].sort((a, b) => {
+      if (sortCol === 'tags') {
+        return sortDir * (a.tags||[]).join(',').localeCompare((b.tags||[]).join(','));
+      }
+      return sortDir * (a[sortCol]??'').localeCompare(b[sortCol]??'');
+    });
+    tbody.innerHTML = sorted.map((a, i) => row(a, i)).join('');
+    document.getElementById('gl-table-count').textContent =
+      lower ? `${sorted.length} of ${currentArticles.length}` : `${currentArticles.length} articles`;
+  }
+
+  async function switchYear(year) {
+    currentArticles = await loadYear(year);
+    filterText = '';
+    document.getElementById('gl-table-filter').value = '';
+    sortCol = 'readDate'; sortDir = -1;
+    document.querySelectorAll('#gl-articles-table th').forEach(h => h.classList.remove('sort-asc','sort-desc'));
+    document.querySelector('#gl-articles-table th[data-col="readDate"]').classList.add('sort-desc');
+    renderRows();
+  }
+
+  try {
+    // populate year dropdown: numeric years descending, then 'unread' at the end
+    const sel = document.getElementById('gl-year-select');
+    const numericYears = Object.keys(YEAR_URLS).filter(y => y !== 'unread').sort().reverse();
+    const allYears = YEAR_URLS['unread'] ? [...numericYears, 'unread'] : numericYears;
+
+    if (allYears.length === 0) {
+      throw new Error('no article year-files found in page bundle – run goodlinks-visuals.py');
+    }
+
+    const currentYear = String(new Date().getFullYear());
+    const defaultYear = allYears.includes(currentYear) ? currentYear : allYears[0];
+
+    allYears.forEach(y => {
+      const o = document.createElement('option');
+      o.value = y; o.textContent = y;
+      if (y === defaultYear) o.selected = true;
+      sel.appendChild(o);
+    });
 
     document.querySelectorAll('#gl-articles-table th').forEach(th => {
       th.addEventListener('click', () => {
@@ -114,22 +158,19 @@
         sortCol = col;
         document.querySelectorAll('#gl-articles-table th').forEach(h => h.classList.remove('sort-asc','sort-desc'));
         th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
-        render();
+        renderRows();
       });
     });
 
     document.getElementById('gl-table-filter').addEventListener('input', e => {
       filterText = e.target.value;
-      render();
+      renderRows();
     });
 
-    makeColumnsResizable(document.getElementById('gl-articles-table'));
-    render();
-  }
+    sel.addEventListener('change', () => switchYear(sel.value).catch(chartError));
 
-  try {
-    const { articles } = await loadData();
-    renderTable(articles);
+    makeColumnsResizable(document.getElementById('gl-articles-table'));
+    await switchYear(defaultYear);
   } catch (err) { chartError(err); }
 })();
 </script>

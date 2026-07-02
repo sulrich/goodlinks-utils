@@ -11,8 +11,10 @@
 
   /* sortable / resizable table */
   .gl-table-section { width: 100%; }
-  .gl-table-toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.4rem; }
-  #gl-table-filter { padding: 0.3rem 0.5rem; font-size: 0.85rem; width: 260px; border: 1px solid #ccc; border-radius: 3px; }
+  .gl-table-toolbar { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.4rem; flex-wrap: wrap; }
+  .gl-table-toolbar label { font-size: 0.85rem; }
+  #gl-year-select { padding: 0.2rem 0.4rem; font-size: 0.85rem; border: 1px solid #ccc; border-radius: 3px; }
+  #gl-table-filter { padding: 0.3rem 0.5rem; font-size: 0.85rem; width: 220px; border: 1px solid #ccc; border-radius: 3px; }
   #gl-table-count { font-size: 0.78rem; color: #666; }
   #gl-table-container { overflow-x: auto; overflow-y: auto; max-height: 430px; border: 1px solid #ddd; border-radius: 4px; width: 100%; }
   table.gl-articles { border-collapse: collapse; width: 100%; font-size: 0.78rem; table-layout: fixed; }
@@ -23,12 +25,14 @@
   table.gl-articles th:hover { background: #ddd; }
   table.gl-articles th.sort-asc::after  { content: " ▲"; }
   table.gl-articles th.sort-desc::after { content: " ▼"; }
-  table.gl-articles tr:nth-child(even) td { background: #fafafa; }
+  table.gl-articles tr.gl-row-even td { background: #fafafa; }
+  table.gl-articles tr.gl-detail-row td { background: #f4f7fb; white-space: normal; overflow: visible; text-overflow: clip; padding: 0.4rem 0.75rem; }
+  .gl-highlight-note { font-size: 0.78rem; margin: 0.2rem 0; }
+  blockquote.gl-highlight { margin: 0.3rem 0 0.3rem 0.25rem; padding: 0.15rem 0.6rem; border-left: 3px solid #c5d4ee; color: #333; font-style: italic; }
   table.gl-articles td a { color: #0057b7; text-decoration: none; }
   table.gl-articles td a:hover { text-decoration: underline; }
-  .gl-col-date   { width: 74px; }
-  .gl-col-domain { width: 140px; }
-  .gl-col-tags   { width: 180px; white-space: normal; }
+  .gl-col-date { width: 74px; }
+  .gl-col-tags { width: 240px; white-space: normal; }
   .gl-col-resize-handle {
     position: absolute; right: 0; top: 0; bottom: 0; width: 5px;
     cursor: col-resize; z-index: 2;
