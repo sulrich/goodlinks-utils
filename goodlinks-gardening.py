@@ -15,10 +15,14 @@ default API base URL: http://localhost:9428/api/v1
 
 import argparse
 import concurrent.futures
+import csv
 import json
 import os
+import re
 import sys
+import zipfile
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -105,6 +109,32 @@ class GoodLinksClient:
         resp.raise_for_status()
         return resp.json()
 
+    def add_link(
+        self,
+        url: str,
+        title: str | None = None,
+        summary: str | None = None,
+        tags: list[str] | None = None,
+        added_at: str | None = None,
+    ) -> dict:
+        """create a new link via POST /links.
+
+        only `url` is required; goodlinks auto-fetches missing metadata. pass
+        `added_at` as an ISO-8601 timestamp to preserve an original saved date.
+        """
+        payload: dict = {"url": url}
+        if title:
+            payload["title"] = title[:200]
+        if summary:
+            payload["summary"] = summary[:400]
+        if tags:
+            payload["tags"] = tags
+        if added_at:
+            payload["addedAt"] = added_at
+        resp = self.session.post(f"{self.base_url}/links", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
     def get_all_tags(self) -> list[str]:
         """fetch all tag strings in the collection."""
         resp = self.session.get(f"{self.base_url}/tags")
@@ -167,6 +197,102 @@ def _domain_of(url: str) -> str:
         return _normalise_domain(urlparse(url).netloc)
     except Exception:
         return ""
+
+
+def _normalise_url(url: str) -> str:
+    """
+    reduce a URL to 'host/path' (lowercased, no leading 'www.', no trailing
+    slash) so the same article from two sources compares equal. used to match
+    readwise articles against goodlinks links.
+    """
+    try:
+        parsed = urlparse(url.strip())
+        return _normalise_domain(parsed.netloc) + parsed.path.rstrip("/")
+    except Exception:
+        return url.strip().lower()
+
+
+# ---------------------------------------------------------------------------
+# readwise export parsing
+# ---------------------------------------------------------------------------
+
+
+def _rw_title_key(title: str) -> str:
+    """collapse a title to a fuzzy match key (alnum words, lowercased)."""
+    return re.sub(r"\W+", " ", title).strip().lower()
+
+
+def _rw_iso_utc(timestamp: str) -> str | None:
+    """
+    convert a readwise 'Highlighted at' value (e.g.
+    '2015-08-10 22:40:42.381870+00:00') to a goodlinks ISO-8601 UTC stamp
+    ('2015-08-10T22:40:42Z'). returns None if unparseable.
+    """
+    try:
+        dt = datetime.fromisoformat(timestamp.strip())
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _rw_find_export(readwise_dir: Path) -> tuple[Path, Path]:
+    """locate Readwise.zip and the largest readwise-data*.csv in a directory."""
+    zip_path = readwise_dir / "Readwise.zip"
+    if not zip_path.is_file():
+        raise FileNotFoundError(f"no Readwise.zip found in {readwise_dir}")
+    csvs = sorted(
+        readwise_dir.glob("readwise-data*.csv"),
+        key=lambda p: p.stat().st_size,
+        reverse=True,
+    )
+    if not csvs:
+        raise FileNotFoundError(f"no readwise-data*.csv found in {readwise_dir}")
+    return zip_path, csvs[0]
+
+
+def _rw_parse_articles(zip_path: Path) -> list[dict]:
+    """
+    parse Articles/*.md from a readwise markdown export.
+
+    returns {title, full_title, url} per article that has a URL. articles
+    without a URL can't be matched to goodlinks, so they're skipped.
+    """
+    articles: list[dict] = []
+    with zipfile.ZipFile(zip_path) as zf:
+        for name in zf.namelist():
+            if not (name.startswith("Articles/") and name.endswith(".md")):
+                continue
+            text = zf.read(name).decode("utf-8", "replace")
+            url_match = re.search(r"^- URL:\s*(\S+)", text, re.M)
+            if not url_match:
+                continue
+            title = text.splitlines()[0].lstrip("# ").strip()
+            ft_match = re.search(r"^- Full Title:\s*(.+)$", text, re.M)
+            full_title = ft_match.group(1).strip() if ft_match else title
+            articles.append(
+                {"title": title, "full_title": full_title, "url": url_match.group(1).strip()}
+            )
+    return articles
+
+
+def _rw_dates_by_title(csv_path: Path) -> dict[str, str]:
+    """
+    map fuzzy title key -> earliest highlight date (ISO-8601 UTC) from the CSV.
+    the markdown export has no saved date, so the earliest highlight timestamp
+    is the best proxy for when the article was read.
+    """
+    earliest: dict[str, str] = {}
+    with csv_path.open(newline="") as fh:
+        for row in csv.DictReader(fh):
+            stamp = _rw_iso_utc(row.get("Highlighted at", ""))
+            if not stamp:
+                continue
+            key = _rw_title_key(row.get("Book Title", ""))
+            if key and (key not in earliest or stamp < earliest[key]):
+                earliest[key] = stamp
+    return earliest
 
 
 def _fetch_url_content(url: str, timeout: int = 30) -> str | None:
@@ -371,6 +497,91 @@ def cmd_tag_domain(client: GoodLinksClient, args: argparse.Namespace) -> None:
             print(f"  error updating '{link.get('url', '')}': {e}", file=sys.stderr)
 
     print(f"done. tagged {updated}/{len(needs_tag)} article(s).")
+
+
+def cmd_readwise_import(client: GoodLinksClient, args: argparse.Namespace) -> None:
+    """
+    import readwise articles that are missing from goodlinks.
+
+    reads Articles/*.md from Readwise.zip for each article's URL and title, and
+    the readwise CSV for the earliest highlight date (used as the saved date).
+    any article whose URL is not already in goodlinks is added and tagged
+    (default 'readwise'); articles that already exist are left untouched.
+
+    NOTE: readwise highlights are not imported -- the goodlinks API has no
+    highlight-creation endpoint, so highlights can only be made in the app UI.
+    """
+    readwise_dir = Path(args.readwise_dir).expanduser()
+    tag = args.tag
+    dry_run = args.dry_run
+
+    zip_path, csv_path = _rw_find_export(readwise_dir)
+    articles = _rw_parse_articles(zip_path)
+    dates = _rw_dates_by_title(csv_path)
+
+    existing = {
+        _normalise_url(link["url"])
+        for link in client.get_all_links()
+        if link.get("url")
+    }
+
+    to_add: list[dict] = []
+    for art in articles:
+        if _normalise_url(art["url"]) in existing:
+            continue
+        added_at = dates.get(_rw_title_key(art["full_title"])) or dates.get(
+            _rw_title_key(art["title"])
+        )
+        to_add.append(
+            {
+                "url": art["url"],
+                "title": art["full_title"],
+                "tag": tag,
+                "addedAt": added_at,
+            }
+        )
+
+    if args.json:
+        # report-only: emit the plan as JSON, make no changes.
+        print(json.dumps(to_add, indent=2))
+        return
+
+    print(
+        f"readwise export: {len(articles)} article(s); "
+        f"{len(articles) - len(to_add)} already in goodlinks, "
+        f"{len(to_add)} missing.\n"
+    )
+    if not to_add:
+        print("nothing to add. goodlinks already has every readwise article.")
+        return
+
+    for art in to_add:
+        print(f"  {(art['title'] or 'Untitled')[:70]}")
+        print(f"    {art['url']}")
+        print(f"    tag: {art['tag']}  saved: {art['addedAt'] or '(none - uses now)'}")
+
+    if dry_run:
+        print(
+            f"\n[dry-run] would add {len(to_add)} article(s) tagged '{tag}'. "
+            "no changes made."
+        )
+        return
+
+    print(f"\nadding {len(to_add)} article(s) tagged '{tag}'...")
+    added = 0
+    for art in to_add:
+        try:
+            client.add_link(
+                url=art["url"],
+                title=art["title"],
+                tags=[tag],
+                added_at=art["addedAt"],
+            )
+            added += 1
+        except requests.exceptions.HTTPError as e:
+            print(f"  error adding '{art['url']}': {e}", file=sys.stderr)
+
+    print(f"done. added {added}/{len(to_add)} article(s).")
 
 
 def cmd_dedupe(client: GoodLinksClient, args: argparse.Namespace) -> None:
@@ -900,6 +1111,47 @@ def build_parser() -> argparse.ArgumentParser:
         help="preview which articles would be tagged without making any changes",
     )
     p_td.set_defaults(func=cmd_tag_domain)
+
+    # ---- readwise-import ----------------------------------------------------
+    p_rw = sub.add_parser(
+        "readwise-import",
+        help="add readwise-export articles that are missing from goodlinks",
+        description=(
+            "import articles from a readwise export (Readwise.zip + CSV) that are\n"
+            "not already in goodlinks. each missing article is added and tagged\n"
+            "(default 'readwise'), preserving the earliest readwise highlight date\n"
+            "as the saved date.\n\n"
+            "highlights are NOT imported: the goodlinks API has no highlight-\n"
+            "creation endpoint, so highlights can only be made in the app UI.\n\n"
+            "example:\n"
+            "  goodlinks-gardening.py readwise-import --readwise-dir readwise --dry-run\n"
+            "  goodlinks-gardening.py readwise-import --readwise-dir readwise"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_rw.add_argument(
+        "--readwise-dir",
+        default="readwise",
+        metavar="DIR",
+        help="directory holding Readwise.zip and readwise-data*.csv (default: readwise)",
+    )
+    p_rw.add_argument(
+        "--tag",
+        default="readwise",
+        metavar="TAG",
+        help="tag applied to every imported article (default: readwise)",
+    )
+    p_rw.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="preview which articles would be added without making any changes",
+    )
+    p_rw.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the import plan as JSON and make no changes (report-only)",
+    )
+    p_rw.set_defaults(func=cmd_readwise_import)
 
     # ---- dedupe -------------------------------------------------------------
     p_dd = sub.add_parser(
