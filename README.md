@@ -85,6 +85,34 @@ at least that one you presumably meant to save.
 ./goodlinks-gardening.py dedupe --json
 ```
 
+### `safari-import`
+
+lets the safari reading list act as an inbox for machines that don't have
+goodlinks installed. save to the reading list anywhere, icloud syncs it to the
+mac running goodlinks, and this pulls it in. anything not already in goodlinks
+gets added (tagged `safari` by default, keeping the date you saved it). then
+everything that's now in goodlinks comes out of the reading list. an item that
+fails to import is left alone.
+
+safari can't remove reading list items from a script, so this edits
+`~/Library/Safari/Bookmarks.plist` directly. that has a few consequences:
+
+- the app running the script needs full disk access.
+- safari has to be quit for a real run, otherwise it overwrites the change.
+  the command refuses to run while it's open.
+- a timestamped backup (`Bookmarks.plist.goodlinks-*.bak`) goes next to the
+  file before every write.
+- whether icloud carries the deletion to your other machines (rather than
+  quietly restoring the items) is worth checking with `--limit 1` before you
+  trust it with everything.
+
+```bash
+./goodlinks-gardening.py safari-import --dry-run
+./goodlinks-gardening.py safari-import --limit 1
+./goodlinks-gardening.py safari-import
+./goodlinks-gardening.py safari-import --keep    # import, leave reading list alone
+```
+
 ### `dead-links`
 
 probes your collection for articles that have gone dark. an article is flagged as
