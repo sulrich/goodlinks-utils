@@ -60,3 +60,4 @@ did not sync to icloud, which led to the import-only decision above.
 - 47cbc5b add safari-import: move reading list items into goodlinks
 - 5933205 safari-import: flatten line breaks in reading list titles
 - d9cff3d safari-import: import only, stop editing Bookmarks.plist
+- 0c047c4 safari-import: save imports with the import time, not DateAdded
