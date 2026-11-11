@@ -345,10 +345,12 @@ def _sl_items(root: dict) -> list[dict]:
         if not url:
             continue
         added = leaf.get("ReadingList", {}).get("DateAdded")
+        # safari keeps line breaks from the page <title>; flatten them.
+        title = " ".join(leaf.get("URIDictionary", {}).get("title", "").split())
         items.append(
             {
                 "url": url,
-                "title": leaf.get("URIDictionary", {}).get("title", ""),
+                "title": title,
                 "addedAt": added.strftime("%Y-%m-%dT%H:%M:%SZ") if added else None,
                 "uuid": leaf.get("WebBookmarkUUID"),
             }

@@ -82,6 +82,13 @@ def test_items_without_date_added_have_none(root):
     assert gardening._sl_items(root)[1]["addedAt"] is None
 
 
+def test_items_title_whitespace_is_collapsed():
+    root = _bookmarks(
+        [_leaf("https://c.example/", " Jules Verne\u2019s\n Paris ", "C", None)]
+    )
+    assert gardening._sl_items(root)[0]["title"] == "Jules Verne\u2019s Paris"
+
+
 def test_items_missing_reading_list_folder_is_empty():
     assert gardening._sl_items(_bookmarks(None)) == []
 
