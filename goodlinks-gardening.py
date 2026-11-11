@@ -648,9 +648,11 @@ def cmd_safari_import(client: GoodLinksClient, args: argparse.Namespace) -> None
     """
     add safari reading list items that are missing from goodlinks.
 
-    each missing item is added and tagged (default 'safari'), keeping the
-    reading list's DateAdded as the saved date. items already in goodlinks are
-    skipped, so re-running is safe.
+    each missing item is added and tagged (default 'safari'). the saved date
+    is the import time, not the reading list's DateAdded: goodlinks sorts
+    unread by saved date, so backdated imports get buried under newer saves
+    (and the API can't change addedAt afterwards). items already in goodlinks
+    are skipped, so re-running is safe.
 
     the reading list is read-only here. editing Bookmarks.plist removes items
     locally but safari's cloudkit sync never sends those deletions, so they
@@ -678,7 +680,7 @@ def cmd_safari_import(client: GoodLinksClient, args: argparse.Namespace) -> None
     for item in to_add:
         print(f"  {(item['title'] or 'Untitled')[:70]}")
         print(f"    {item['url']}")
-        print(f"    tag: {tag}  saved: {item['addedAt'] or '(none - uses now)'}")
+        print(f"    tag: {tag}")
 
     if args.dry_run:
         print(
@@ -694,7 +696,6 @@ def cmd_safari_import(client: GoodLinksClient, args: argparse.Namespace) -> None
                 url=item["url"],
                 title=item["title"],
                 tags=[tag],
-                added_at=item["addedAt"],
             )
         except requests.exceptions.HTTPError as e:
             failed += 1
@@ -1291,7 +1292,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="add safari reading list items that are missing from goodlinks",
         description=(
             "add safari reading list items that aren't in goodlinks yet, tagged\n"
-            "(default 'safari') and keeping the reading list's date added.\n\n"
+            "(default 'safari'). they're saved with the import time so they land\n"
+            "at the top of unread.\n\n"
             "the reading list itself is never modified: safari only syncs deletions\n"
             "it makes itself, so clear it in safari (right-click the reading list\n"
             "sidebar -> Clear All Items) once the import says it's safe.\n\n"

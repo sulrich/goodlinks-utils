@@ -5,7 +5,9 @@ run with:
   uv run --with pytest --with requests --with anthropic pytest tests/
 """
 
+import argparse
 import importlib.util
+import plistlib
 from datetime import datetime
 from pathlib import Path
 
@@ -90,3 +92,31 @@ def test_items_title_whitespace_is_collapsed():
 
 def test_items_missing_reading_list_folder_is_empty():
     assert gardening._sl_items(_bookmarks(None)) == []
+
+
+class _FakeClient:
+    """records add_link calls; goodlinks is empty."""
+
+    def __init__(self):
+        self.added: list[dict] = []
+
+    def get_all_links(self):
+        return []
+
+    def add_link(self, **kwargs):
+        self.added.append(kwargs)
+        return {}
+
+
+def test_import_does_not_backdate_new_links(tmp_path, root):
+    # goodlinks sorts unread by addedAt, so backdated imports get buried.
+    path = tmp_path / "Bookmarks.plist"
+    path.write_bytes(plistlib.dumps(root, fmt=plistlib.FMT_BINARY))
+    client = _FakeClient()
+    args = argparse.Namespace(
+        bookmarks=str(path), tag="safari", dry_run=False, json=False
+    )
+
+    gardening.cmd_safari_import(client, args)
+
+    assert [a.get("added_at") for a in client.added] == [None, None]

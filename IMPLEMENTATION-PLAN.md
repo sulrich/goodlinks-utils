@@ -27,6 +27,10 @@ findings:
   ("Clear All Items") once the command reports everything is in goodlinks.
   `--keep`, `--limit`, the plist write path and the safari-running check
   were removed.
+- **don't backdate imports.** keeping DateAdded as `addedAt` sorted the
+  imports by original date, burying them under newer unread links. `PATCH
+  /links/{id}` accepts but ignores `addedAt`, so the only way to fix a date
+  is to delete and re-add the link. imports now use the import time.
 
 ## stage 1: reading-list parse/remove helpers
 **goal**: `_sl_items()` returns {url, title, addedAt, uuid} per item;

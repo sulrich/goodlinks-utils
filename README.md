@@ -90,7 +90,8 @@ at least that one you presumably meant to save.
 lets the safari reading list act as an inbox for machines that don't have
 goodlinks installed. save to the reading list anywhere, icloud syncs it to the
 mac running goodlinks, and this pulls it in. anything not already in goodlinks
-gets added, tagged `safari` by default and keeping the date you saved it.
+gets added, tagged `safari` by default. it's saved with the import time
+(not the reading list date) so it lands at the top of unread.
 running it again is safe, since items already in goodlinks get skipped.
 
 it only reads the reading list and never changes it. safari syncs through
