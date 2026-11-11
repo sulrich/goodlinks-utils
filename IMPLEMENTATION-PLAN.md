@@ -45,3 +45,4 @@ after sync.
 **status**: blocked - needs full disk access to read the real Bookmarks.plist; removal path verified against a synthetic plist
 
 ## commit log
+- 47cbc5b add safari-import: move reading list items into goodlinks
