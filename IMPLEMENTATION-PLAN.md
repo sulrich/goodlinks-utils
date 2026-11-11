@@ -1,7 +1,7 @@
 # safari reading list -> goodlinks import
 
 start time: 2026-11-11
-end time:
+end time: 2026-11-11
 
 ## overview
 
@@ -17,32 +17,40 @@ findings:
   `WebBookmarkUUID`.
 - reading/writing that file requires full disk access for the calling app.
 - safari has no scripting hook for removing reading-list items (applescript
-  can only add), so removal means editing the plist directly. whether icloud
-  sync propagates (or reverts) that edit has to be checked by hand.
+  can only add).
+- **plist removal doesn't sync.** tested 2026-11-11 with `--limit 1`: the
+  item disappeared on this mac but stayed in icloud and on the work laptop.
+  every item carries a cloudkit record id (`Sync.ServerID`), and safari's
+  sync agent only pushes changes safari made itself, so a missing record is
+  never sent as a delete.
+- decision (user): import only. the user clears the reading list in safari
+  ("Clear All Items") once the command reports everything is in goodlinks.
+  `--keep`, `--limit`, the plist write path and the safari-running check
+  were removed.
 
 ## stage 1: reading-list parse/remove helpers
 **goal**: `_sl_items()` returns {url, title, addedAt, uuid} per item;
 `_sl_remove()` drops items by uuid from the loaded plist.
 **success criteria**: unit tests pass against a synthetic binary plist.
 **tests**: items parsed with ISO-8601 UTC dates; missing reading-list folder
--> []; removal leaves other bookmarks and non-matching items untouched.
+-> []; titles flattened to one line. (removal helpers later dropped.)
 **status**: complete
 
 ## stage 2: safari-import command
 **goal**: `safari-import` adds missing items to goodlinks (tag `safari`,
-preserve DateAdded), then removes imported + already-present items from the
-reading list (backup first, refuse while safari is running).
-**success criteria**: `--dry-run` and `--json` make no changes; `--keep`
-skips removal; `--limit N` caps how many items are processed; a failed add is
-never removed.
-**status**: complete
+preserve DateAdded) and says when the reading list is safe to clear.
+**success criteria**: `--dry-run` and `--json` make no changes; re-running
+adds nothing new; never writes Bookmarks.plist.
+**status**: complete (first version also removed items from the plist; that
+was dropped after stage 3 showed it doesn't sync)
 
 ## stage 3: real-world check
-**goal**: dry-run against the real reading list; import + remove a single item
-with `--limit 1`; confirm it stays gone after icloud sync on both machines.
-**success criteria**: item in goodlinks, gone from reading list on both macs
-after sync.
-**status**: blocked - needs full disk access to read the real Bookmarks.plist; removal path verified against a synthetic plist
+**goal**: dry-run against the real reading list; import + remove a single item;
+confirm removal syncs.
+**success criteria**: item in goodlinks; reading list state consistent across
+devices.
+**status**: complete. import works (12 items found, 1 imported). removal
+did not sync to icloud, which led to the import-only decision above.
 
 ## commit log
 - 47cbc5b add safari-import: move reading list items into goodlinks

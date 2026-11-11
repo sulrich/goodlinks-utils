@@ -6,7 +6,6 @@ run with:
 """
 
 import importlib.util
-import plistlib
 from datetime import datetime
 from pathlib import Path
 
@@ -66,11 +65,11 @@ def root() -> dict:
     )
 
 
-def test_items_parse_url_title_and_uuid(root):
+def test_items_parse_url_and_title(root):
     items = gardening._sl_items(root)
-    assert [(i["url"], i["title"], i["uuid"]) for i in items] == [
-        ("https://a.example/one", "one", "UUID-A"),
-        ("https://b.example/two", "two", "UUID-B"),
+    assert [(i["url"], i["title"]) for i in items] == [
+        ("https://a.example/one", "one"),
+        ("https://b.example/two", "two"),
     ]
 
 
@@ -91,28 +90,3 @@ def test_items_title_whitespace_is_collapsed():
 
 def test_items_missing_reading_list_folder_is_empty():
     assert gardening._sl_items(_bookmarks(None)) == []
-
-
-def test_remove_drops_only_matching_uuids(root):
-    removed = gardening._sl_remove(root, {"UUID-A"})
-    assert removed == 1
-    assert [i["uuid"] for i in gardening._sl_items(root)] == ["UUID-B"]
-
-
-def test_remove_leaves_other_folders_untouched(root):
-    gardening._sl_remove(root, {"UUID-A", "UUID-B", "BAR-1"})
-    bar = root["Children"][0]["Children"]
-    assert [c["WebBookmarkUUID"] for c in bar] == ["BAR-1"]
-
-
-def test_write_round_trips_and_keeps_backup(tmp_path, root):
-    path = tmp_path / "Bookmarks.plist"
-    path.write_bytes(plistlib.dumps(root, fmt=plistlib.FMT_BINARY))
-    loaded = gardening._sl_load(path)
-    gardening._sl_remove(loaded, {"UUID-A"})
-
-    backup = gardening._sl_write(path, loaded)
-
-    remaining = gardening._sl_items(gardening._sl_load(path))
-    assert [i["uuid"] for i in remaining] == ["UUID-B"]
-    assert len(gardening._sl_items(gardening._sl_load(backup))) == 2
