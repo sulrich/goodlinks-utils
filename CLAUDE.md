@@ -108,6 +108,8 @@ chmod +x goodlinks-gardening.py
 
 ./goodlinks-gardening.py tag-domain --domain github.com --tag dev --dry-run
 ./goodlinks-gardening.py tag-domain --domain nytimes.com --tag news
+
+./goodlinks-gardening.py safari-import --dry-run
 ```
 
 or invoke explicitly via `uv run`:
@@ -122,6 +124,12 @@ use `--help` on any subcommand for full flag documentation:
 ```bash
 ./goodlinks-gardening.py --help
 ./goodlinks-gardening.py tag-domain --help
+```
+
+### tests
+
+```bash
+uv run --with pytest --with requests --with anthropic pytest tests/
 ```
 
 ### adding new dependencies

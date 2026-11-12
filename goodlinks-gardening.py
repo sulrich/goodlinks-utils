@@ -18,6 +18,7 @@ import concurrent.futures
 import csv
 import json
 import os
+import plistlib
 import re
 import sys
 import zipfile
@@ -293,6 +294,65 @@ def _rw_dates_by_title(csv_path: Path) -> dict[str, str]:
             if key and (key not in earliest or stamp < earliest[key]):
                 earliest[key] = stamp
     return earliest
+
+
+# ---------------------------------------------------------------------------
+# safari reading list
+# ---------------------------------------------------------------------------
+
+SAFARI_BOOKMARKS = Path("~/Library/Safari/Bookmarks.plist").expanduser()
+SAFARI_READING_LIST_TITLE = "com.apple.ReadingList"
+
+
+def _sl_load(path: Path) -> dict:
+    """
+    load safari's Bookmarks.plist. reading it needs full disk access for the
+    app running this script, so turn the bare PermissionError into something
+    actionable.
+    """
+    try:
+        with path.open("rb") as fh:
+            return plistlib.load(fh)
+    except PermissionError as e:
+        raise PermissionError(
+            f"can't read {path}. grant full disk access to the app running this "
+            "script (system settings -> privacy & security -> full disk access)."
+        ) from e
+
+
+def _sl_folder(root: dict) -> dict | None:
+    """return the reading list folder from the bookmarks tree, or None."""
+    for child in root.get("Children", []):
+        if child.get("Title") == SAFARI_READING_LIST_TITLE:
+            return child
+    return None
+
+
+def _sl_items(root: dict) -> list[dict]:
+    """
+    return {url, title, addedAt} for each reading list item. addedAt is
+    the ISO-8601 UTC 'DateAdded' stamp (plistlib hands back naive UTC
+    datetimes), or None if safari didn't record one.
+    """
+    folder = _sl_folder(root)
+    if folder is None:
+        return []
+    items: list[dict] = []
+    for leaf in folder.get("Children", []):
+        url = leaf.get("URLString")
+        if not url:
+            continue
+        added = leaf.get("ReadingList", {}).get("DateAdded")
+        # safari keeps line breaks from the page <title>; flatten them.
+        title = " ".join(leaf.get("URIDictionary", {}).get("title", "").split())
+        items.append(
+            {
+                "url": url,
+                "title": title,
+                "addedAt": added.strftime("%Y-%m-%dT%H:%M:%SZ") if added else None,
+            }
+        )
+    return items
 
 
 def _fetch_url_content(url: str, timeout: int = 30) -> str | None:
@@ -582,6 +642,79 @@ def cmd_readwise_import(client: GoodLinksClient, args: argparse.Namespace) -> No
             print(f"  error adding '{art['url']}': {e}", file=sys.stderr)
 
     print(f"done. added {added}/{len(to_add)} article(s).")
+
+
+def cmd_safari_import(client: GoodLinksClient, args: argparse.Namespace) -> None:
+    """
+    add safari reading list items that are missing from goodlinks.
+
+    each missing item is added and tagged (default 'safari'). the saved date
+    is the import time, not the reading list's DateAdded: goodlinks sorts
+    unread by saved date, so backdated imports get buried under newer saves
+    (and the API can't change addedAt afterwards). items already in goodlinks
+    are skipped, so re-running is safe.
+
+    the reading list is read-only here. editing Bookmarks.plist removes items
+    locally but safari's cloudkit sync never sends those deletions, so they
+    linger in icloud and on other devices. clearing has to happen in safari.
+    """
+    tag = args.tag
+    items = _sl_items(_sl_load(Path(args.bookmarks).expanduser()))
+
+    existing = {
+        _normalise_url(link["url"])
+        for link in client.get_all_links()
+        if link.get("url")
+    }
+    to_add = [i for i in items if _normalise_url(i["url"]) not in existing]
+
+    if args.json:
+        # report-only: emit the plan as JSON, make no changes.
+        print(json.dumps(to_add, indent=2))
+        return
+
+    print(
+        f"reading list: {len(items)} item(s); "
+        f"{len(items) - len(to_add)} already in goodlinks, {len(to_add)} to add.\n"
+    )
+    for item in to_add:
+        print(f"  {(item['title'] or 'Untitled')[:70]}")
+        print(f"    {item['url']}")
+        print(f"    tag: {tag}")
+
+    if args.dry_run:
+        print(
+            f"\n[dry-run] would add {len(to_add)} article(s) tagged '{tag}'. "
+            "no changes made."
+        )
+        return
+
+    failed = 0
+    for item in to_add:
+        try:
+            client.add_link(
+                url=item["url"],
+                title=item["title"],
+                tags=[tag],
+            )
+        except requests.exceptions.HTTPError as e:
+            failed += 1
+            print(f"  error adding '{item['url']}': {e}", file=sys.stderr)
+    if to_add:
+        print(f"added {len(to_add) - failed}/{len(to_add)} article(s).")
+
+    if not items:
+        print("reading list is empty. nothing to do.")
+    elif failed:
+        print(
+            f"\n{failed} item(s) failed to import. don't clear the reading list "
+            "until a re-run adds them."
+        )
+    else:
+        print(
+            "\nevery reading list item is in goodlinks. safe to clear it in safari "
+            "(reading list sidebar -> right-click -> Clear All Items)."
+        )
 
 
 def cmd_dedupe(client: GoodLinksClient, args: argparse.Namespace) -> None:
@@ -1153,6 +1286,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_rw.set_defaults(func=cmd_readwise_import)
 
+    # ---- safari-import ------------------------------------------------------
+    p_sf = sub.add_parser(
+        "safari-import",
+        help="add safari reading list items that are missing from goodlinks",
+        description=(
+            "add safari reading list items that aren't in goodlinks yet, tagged\n"
+            "(default 'safari'). they're saved with the import time so they land\n"
+            "at the top of unread.\n\n"
+            "the reading list itself is never modified: safari only syncs deletions\n"
+            "it makes itself, so clear it in safari (right-click the reading list\n"
+            "sidebar -> Clear All Items) once the import says it's safe.\n\n"
+            "needs full disk access for the app running this script.\n\n"
+            "example:\n"
+            "  goodlinks-gardening.py safari-import --dry-run\n"
+            "  goodlinks-gardening.py safari-import"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_sf.add_argument(
+        "--bookmarks",
+        default=str(SAFARI_BOOKMARKS),
+        metavar="PATH",
+        help=f"safari bookmarks plist (default: {SAFARI_BOOKMARKS})",
+    )
+    p_sf.add_argument(
+        "--tag",
+        default="safari",
+        metavar="TAG",
+        help="tag applied to every imported article (default: safari)",
+    )
+    p_sf.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="preview which articles would be added without making any changes",
+    )
+    p_sf.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the import plan as JSON and make no changes (report-only)",
+    )
+    p_sf.set_defaults(func=cmd_safari_import)
+
     # ---- dedupe -------------------------------------------------------------
     p_dd = sub.add_parser(
         "dedupe",
@@ -1308,6 +1483,9 @@ def main() -> None:
         sys.exit(1)
     except requests.exceptions.HTTPError as e:
         print(f"API error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except (PermissionError, FileNotFoundError) as e:
+        print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
 
 
